@@ -1,0 +1,30 @@
+# cowork — PRIVATE connection overlay TEMPLATE
+#
+# Copy this to `machines.local.yaml` (gitignored) and fill in the real values for
+# your cluster. It carries the intranet details kept out of the tracked
+# machines.yaml — real hostname, ssh host/port/user, internal_ip — merged onto
+# machines.yaml by node `name` at load time (see cw/registry.py). One entry per
+# node; the `name` must match a node in machines.yaml.
+#
+#   - `hostname`  must equal `hostname` on that box (the agent uses it to tell
+#                 "am I this node?" — is_local() — and to label status output).
+#   - `ssh`       how OTHER nodes reach this one: host/port/user. For a node
+#                 behind a gateway/port-forward, use the gateway host + its port.
+#   - `internal_ip` informational only (not used for connecting).
+
+machines:
+  - name: head
+    hostname: REPLACE-with-hostname-of-head
+    ssh:
+      host: 10.0.0.1           # directly reachable on the intranet
+      port: 22
+      user: root
+    internal_ip: 10.0.0.1
+
+  - name: node-example
+    hostname: REPLACE-with-hostname-of-this-node
+    ssh:
+      host: 10.0.0.1           # e.g. a gateway / port-forward host
+      port: 2222               # the port that maps to this backend node
+      user: root
+    internal_ip: 10.1.0.2      # node's own (possibly non-routable) address

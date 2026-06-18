@@ -1,0 +1,19 @@
+#!/share/ziyangrao/miniconda3/bin/python3
+"""cowork — submit-and-forget job scheduling across the shared-NFS dev cluster.
+
+Thin entrypoint; all logic lives in the `cw` package next to this file. Uses the
+shared miniconda python (same path on every node via NFS) so `cowork up` can start
+the agent remotely without worrying about each node's PATH.
+
+    cowork submit --env libero --gpus 2 -- python train.py   # queue, returns at once
+    cowork ps            cowork status        cowork logs <id> -f
+    cowork cancel <id>   cowork up / down     cowork agent
+"""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from cw.cli import main  # noqa: E402
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,80 @@
+# cowork — machine registry
+#
+# One entry per intranet dev machine. Lives on the shared NFS (/share) so every
+# node can read it without SSH. See CLAUDE.md for the design rationale.
+#
+# Connection details are split out: the private per-node bits — real hostname,
+# ssh host/port/user, internal_ip — live in `machines.local.yaml` (gitignored)
+# and are merged onto these entries by node `name` at load time (cw/registry.py).
+# This file therefore carries only non-sensitive hardware/conda/scheduler config.
+# Copy machines.local.example.yaml -> machines.local.yaml to wire up a cluster.
+#
+# conda is installed on the shared NFS, so the named envs are identical on every
+# node.
+#
+# Re-discover any node with: hostname -I; nproc; free -h; nvidia-smi -L
+# Last verified: 2026-06-18
+
+conda_roots: &conda_roots
+  - /share/ziyangrao/miniconda3
+  - /share/ziyangrao/miniforge3
+
+conda_envs: &conda_envs   # shared via NFS — same on all nodes
+  - base
+  - d3il
+  - fmmi
+  - libero
+  - mmsae
+  - vla_engine_developer
+
+# cowork scheduler config (optional — every field has a built-in default).
+# Read by the per-node agent and the `cowork` CLI; not needed by gpus.py.
+cowork:
+  state_dir: state           # job/agent/log board, relative to this repo (on /share)
+  heartbeat_interval: 5      # seconds between agent heartbeats
+  poll_interval: 3           # seconds between agent claim/reap cycles
+  mem_thresh: 2048           # MiB; a GPU at/under this with no procs counts as free
+  keepbusy:
+    enabled: true
+    env: base                # conda env that has torch, used to run keepbusy
+    run_py: /share/ziyangrao/cowork/keepbusy/run.py   # vendored in this repo (see keepbusy/README.md)
+    idle_minutes: 0.5        # idle time before keepbusy fills a freed GPU
+
+# Per-node hardware/conda. Connection details (hostname/ssh/internal_ip) come
+# from machines.local.yaml, matched by `name`.
+machines:
+  - name: head
+    role: scheduler            # this is the head/scheduler node
+    cpus: 180
+    mem: 1.0Ti
+    gpus:
+      model: NVIDIA B20Z
+      count: 4
+    os: Ubuntu 24.04.1 LTS
+    kernel: 6.8.0-71-generic
+    conda_roots: *conda_roots
+    conda_envs: *conda_envs
+
+  - name: node-8hlhv
+    role: worker
+    cpus: 128
+    mem: 512Gi
+    gpus:
+      model: NVIDIA A800-SXM4-80GB
+      count: 8
+    os: Ubuntu 24.04.1 LTS
+    kernel: 5.15.0-72-generic
+    conda_roots: *conda_roots
+    conda_envs: *conda_envs
+
+  - name: node-zt2bc            # replaced the former node-nvsrs pod (2026-06-18)
+    role: worker                # reached via a gateway port-forward; see machines.local.yaml
+    cpus: 128
+    mem: 1.0Ti
+    gpus:
+      model: NVIDIA A800-SXM4-80GB
+      count: 8
+    os: Ubuntu 24.04.1 LTS
+    kernel: 5.15.0-72-generic
+    conda_roots: *conda_roots
+    conda_envs: *conda_envs
