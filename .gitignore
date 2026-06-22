@@ -5,6 +5,3 @@ __pycache__/
 # Private per-node connection overlay (intranet IPs / hostnames / ssh ports).
 # Real values live here and are merged onto machines.yaml at load time.
 machines.local.yaml
-
-# Deployment key material — node SSH public keys (filename leaks host/IP).
-pubkeys/
