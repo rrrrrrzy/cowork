@@ -85,12 +85,33 @@ class Agent:
         external job every time it loads a GPU, drops that GPU, and makes
         _set_keepbusy() thrash keepbusy in a restart loop — it never sustains load,
         the GPUs sit at 0% util, and the node gets reclaimed by the cluster's
-        idle-shutdown. So on a keepbusy GPU we treat only a *resolvable* foreign
-        process as external (a genuine external job is visible by pid on a bare
-        host like `head`); our keepbusy, and any unresolvable sibling-container
-        proc we couldn't act on anyway, are not. keepbusy yields to real compute on
-        its own regardless. On a GPU we are NOT keeping busy, any compute proc —
-        resolvable or not — still owns the GPU, so we exclude it as before."""
+        idle-shutdown.
+
+        We exploit keepbusy's own shape: it is a single DataParallel process, so on
+        a GPU it owns it contributes AT MOST ONE compute-app entry (and zero while
+        it is merely idle-monitoring, before it has built a CUDA context). So on a
+        keepbusy GPU we exclude it (treat as externally-busy) when ANY of:
+          (a) a *resolvable* foreign proc is present — a genuine external job on a
+              bare host like `head`, where pids resolve;
+          (b) there are >= 2 compute procs — keepbusy alone is <= 1, so a second
+              proc is someone else. This is the SAME threshold keepbusy itself
+              yields on (it returns to monitoring when it sees >= 2 compute pids),
+              so the two stay consistent and keepbusy is never restart-thrashed by
+              its own single proc; and it closes the blind spot where an external
+              job's unresolvable sibling-container proc used to be silently ignored;
+          (c) there is real memory in use with ZERO compute procs — keepbusy holding
+              a GPU always shows its own proc, so mem-without-a-proc is leftover /
+              untracked external usage, not us.
+        Residual (accepted, not fixable inside the pod): if keepbusy is still
+        idle-monitoring (0 procs) when an external job arrives and pins util so
+        keepbusy never builds a context, that job shows as exactly ONE unresolvable
+        proc — indistinguishable from keepbusy actively loading alone (also one
+        unresolvable proc). We can't disambiguate a host pid we can't see, so we err
+        toward NOT thrashing keepbusy; keepbusy yields to that job on its own, and
+        the window is narrow (external must land inside keepbusy's ~30s warm-up).
+
+        On a GPU we are NOT keeping busy, any compute proc — resolvable or not —
+        still owns the GPU, so we exclude it as before."""
         cowork_used = {g for j in self.owned.values() for g in j["gpu_ids"]}
         kb = set(self.keepbusy_gpus)
         kb_pids = {self.keepbusy_proc.pid} if self.keepbusy_proc is not None else set()
@@ -104,16 +125,20 @@ class Agent:
                 continue
             g = gstate.get(idx)
             if g is not None:
+                foreign = [p for p in g["proc_list"] if p["pid"] not in kb_pids]
                 if idx in kb:
-                    # GPU running our keepbusy: only a resolvable foreign proc is
-                    # an external job (see docstring) — never thrash on keepbusy's
-                    # own host-pid'd, unresolvable process.
-                    if [p for p in g["proc_list"]
-                            if p["resolved"] and p["pid"] not in kb_pids]:
+                    # GPU running our keepbusy: exclude on a resolvable foreign
+                    # proc, on >= 2 procs (keepbusy alone is <= 1), or on real
+                    # memory with no proc at all (keepbusy always shows its proc
+                    # when it holds a GPU) — see docstring.
+                    if (any(p["resolved"] for p in foreign)
+                            or len(g["proc_list"]) >= 2
+                            or (not g["proc_list"]
+                                and g["mem_used"] > self.mem_thresh)):
                         continue
                 else:
                     # any compute proc that isn't our keepbusy => external job
-                    if [p for p in g["proc_list"] if p["pid"] not in kb_pids]:
+                    if foreign:
                         continue
                     # leftover/untracked memory on a GPU we are NOT keeping busy
                     if g["mem_used"] > self.mem_thresh:
